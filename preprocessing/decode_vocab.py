@@ -4,8 +4,12 @@ def read_reverse_vocab(filepath):
     with open(filepath, "r") as fi:
         return {i: word for word, i in (line.strip().split() for line in fi)}
 
-def decode(line, vocab):
-    return [vocab[char] for char in line.strip().split()]
+def decode(line, vocab, tags_in_text=False):
+    if tags_in_text:
+        tokens = line.strip().split()
+        return [tokens[0]] + [vocab[char] for char in tokens[1:-1]] + [tokens[-1]]
+    else:
+        return [vocab[char] for char in line.strip().split()]
 
 def textify_plus(tokens):
     spaced = " ".join(tokens)
@@ -27,11 +31,17 @@ if __name__ == "__main__":
             const = True,
             action = "store_const",
             default = False)
+    parser.add_argument("--tags-in-text", 
+            help = "Start symbols were left as they are. e.g. for SRILM",
+            action = "store_true")
+    parser.add_argument("--no-tags",
+            help = "Text has no tags",
+            action = "store_true")
     args = parser.parse_args()
     vocab = read_reverse_vocab(args.vocab)
     for line in fileinput.input(args.input):
-        tokens = decode(line, vocab)
-        without_tags = tokens[1:-1]
+        tokens = decode(line, vocab, tags_in_text=args.tags_in_text)
+        without_tags = tokens[1:-1] if not args.no_tags else tokens
         if args.basic_tokenisation:
             textified = "".join(without_tags)
         else:
