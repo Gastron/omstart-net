@@ -27,8 +27,6 @@ parser.add_argument('--epochs', type=int, default=40,
                     help='upper epoch limit')
 parser.add_argument('--batch-size', type=int, default=20, metavar='N',
                     help='batch size')
-parser.add_argument('--bptt', type=int, default=35,
-                    help='back propagation through time sequence length')
 parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
@@ -51,17 +49,14 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 eval_batch_size = 10
 train_dataset = data.InMemoryTextDataSet(args.data)
+val_dataset = data.InMemoryTextDataSet(args.data)
+train_dataset = data.InMemoryTextDataSet(args.data)
 
 #to be used this way:
 #train_gen = torch.utils.data.DataLoader(train_dataset, 
 #        batch_size = args.batch_size, 
 #        shuffle = True,
 #        collate_fn = data.pad_and_sort_batch)
-#for inputs, targets, lengths in train_gen:
-#    print(inputs[1])
-#    print(targets[1])
-#    print(lengths[1])
-#    print()
 
 ###############################################################################
 # Build the model
@@ -72,50 +67,44 @@ model = model.LSTMLM(train_dataset.vocab_size,  #One for the padding
         args.nhid, 
         args.nlayers).to(device)
 
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(reduction='mean', ignore_index=0)
 
 ###############################################################################
 # Training code
 ###############################################################################
 
-def repackage_hidden(h):
-    """Wraps hidden states in new Tensors, to detach them from their history."""
-    if isinstance(h, torch.Tensor):
-        return h.detach()
-    else:
-        return tuple(repackage_hidden(v) for v in h)
-
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
-    ntokens = len(corpus.dictionary)
-    hidden = model.init_hidden(eval_batch_size)
+    data_gen = torch.utils.data.DataLoader(data_source, 
+        batch_size = eval_batch_size, 
+        shuffle = False,
+        collate_fn = data.pad_and_sort_batch)
     with torch.no_grad():
-        for i in range(0, data_source.size(0) - 1, args.bptt):
-            data, targets = get_batch(data_source, i)
-            output, hidden = model(data, hidden)
-            output_flat = output.view(-1, ntokens)
-            total_loss += len(data) * criterion(output_flat, targets).item()
-            hidden = repackage_hidden(hidden)
-    return total_loss / (len(data_source) - 1)
+        for inputs, targets, seq_lengths in data_gen:
+            inputs, targets, seq_lengths = inputs.to(device), targets.to(device), seq_lengths.to(device)
+            output, hidden = model(inputs, seq_lengths)
+            loss = criterion(output.permute(0,2,1), targets)
+            total_loss += loss.item()
+    return total_loss / (len(data_source) / eval_batch_size) 
 
 def train():
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0.
-    ntokens = train_dataset.vocab_size
     start_time = time.time()
     train_gen = torch.utils.data.DataLoader(train_dataset, 
         batch_size = args.batch_size, 
         shuffle = True,
         collate_fn = data.pad_and_sort_batch)
-    for inputs, targets, seq_lengths in train_gen:
+    for batch_i, (inputs, targets, seq_lengths) in enumerate(train_gen):
+        inputs, targets, seq_lengths = inputs.to(device), targets.to(device), seq_lengths.to(device)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         model.zero_grad()
         output, hidden = model(inputs, seq_lengths)
-        loss = criterion(output.view(-1, ntokens), targets)
+        loss = criterion(output.permute(0,2,1), targets)
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -125,25 +114,15 @@ def train():
 
         total_loss += loss.item()
 
-        if batch % args.log_interval == 0 and batch > 0:
+        if batch_i % args.log_interval == 0 and batch_i > 0:
             cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
+            print('| epoch {:3d} | {:5d}/{:5d} batch_ies | lr {:02.2f} | ms/batch_i {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
-                epoch, batch, len(train_data) // args.bptt, lr,
+                epoch, batch_i, len(train_dataset), lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            total_loss = 0
+            total_loss = 0.
             start_time = time.time()
-
-
-def export_onnx(path, batch_size, seq_len):
-    print('The model is also exported in ONNX format at {}'.
-          format(os.path.realpath(args.onnx_export)))
-    model.eval()
-    dummy_input = torch.LongTensor(seq_len * batch_size).zero_().view(-1, batch_size).to(device)
-    hidden = model.init_hidden(batch_size)
-    torch.onnx.export(model, (dummy_input, hidden), path)
-
 
 # Loop over epochs.
 lr = args.lr
@@ -154,14 +133,14 @@ try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
-        val_loss = evaluate(val_data)
+        val_loss = evaluate(val_dataset)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                            val_loss, math.exp(val_loss)))
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
-        if not best_val_loss or val_loss < best_val_loss:
+        if not best_val_loss or val_loss < best_val_loss or True:
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
@@ -185,7 +164,3 @@ print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
     test_loss, math.exp(test_loss)))
 print('=' * 89)
-
-if len(args.onnx_export) > 0:
-    # Export the model in ONNX format.
-    export_onnx(args.onnx_export, batch_size=1, seq_len=args.bptt)

@@ -28,7 +28,6 @@ class LSTMLM(nn.Module):
         packed = nn.utils.rnn.pack_padded_sequence(embeddings, seq_lengths, batch_first=True)
         rnn_output, hidden_output = self.rnn(packed, hidden_state)
         unpacked, _ = nn.utils.rnn.pad_packed_sequence(rnn_output, batch_first=True)
-         
         projected = self.project_back_to_vocab(unpacked)
         return projected, hidden_output
 
