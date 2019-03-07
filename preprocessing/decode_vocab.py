@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-def read_reverse_vocab(filepath):
+def read_reverse_vocab(filepath, space_symbol):
     with open(filepath, "r") as fi:
-        return {i: word for word, i in (line.strip().split() for line in fi)}
+        return {i: word if word != space_symbol else " " 
+                for word, i in (line.strip().split() for line in fi)}
 
 def decode(line, vocab, tags_in_text=False):
     if tags_in_text:
@@ -28,17 +29,18 @@ if __name__ == "__main__":
             default = False)
     parser.add_argument("--basic-tokenisation", 
             help = "Set this flag if text was tokenized without the adjoining plus symbols",
-            const = True,
-            action = "store_const",
-            default = False)
+            action = "store_true")
     parser.add_argument("--tags-in-text", 
             help = "Start symbols were left as they are. e.g. for SRILM",
             action = "store_true")
     parser.add_argument("--no-tags",
             help = "Text has no tags",
             action = "store_true")
+    parser.add_argument("--space-symbol",
+            default = "<space>",
+            help = "symbol for space, this is printed as the space character")
     args = parser.parse_args()
-    vocab = read_reverse_vocab(args.vocab)
+    vocab = read_reverse_vocab(args.vocab, args.space_symbol)
     for line in fileinput.input(args.input):
         tokens = decode(line, vocab, tags_in_text=args.tags_in_text)
         without_tags = tokens[1:-1] if not args.no_tags else tokens
