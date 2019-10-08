@@ -7,7 +7,7 @@ import argparse
 
 import torch
 
-import data
+import time
 
 parser = argparse.ArgumentParser(description='Char LSTM LM')
 
@@ -18,7 +18,7 @@ parser.add_argument('--outf', type=str, default='generated.txt',
                     help='output file for generated text')
 parser.add_argument('--words', type=int, default='1000',
                     help='number of words to generate')
-parser.add_argument('--seed', type=int, default=1111,
+parser.add_argument('--seed', type=int,
                     help='random seed')
 parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
@@ -29,7 +29,8 @@ parser.add_argument('--log-interval', type=int, default=100,
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
-torch.manual_seed(args.seed)
+seed = args.seed if args.seed is not None else time.time()
+torch.manual_seed(seed)
 if torch.cuda.is_available():
     if not args.cuda:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
@@ -48,6 +49,7 @@ hidden = model.get_hidden_init(batch_size=1)
 seq_lengths = torch.LongTensor([1])
 
 with open(args.outf, 'w') as outf:
+    outf.write("2 ")
     with torch.no_grad():  # no tracking history
         for i in range(args.words):
             output, hidden = model(input, seq_lengths, hidden)
@@ -58,7 +60,7 @@ with open(args.outf, 'w') as outf:
             if word_idx == 0:
                 continue
             if word_idx == 1:
-                outf.write("\n")
+                outf.write("1\n2 ")
                 input = torch.LongTensor([[2]]).to(device)
                 hidden = model.get_hidden_init(batch_size=1)
             else:
